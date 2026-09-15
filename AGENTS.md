@@ -18,32 +18,46 @@ All risky development, debugging, refactors, experiments, migrations, and bug su
 2. **Keep lab `main` as the clean laboratory baseline.** Do not use it as a scratchpad for destructive experiments once a usable baseline exists.
 3. **Create a dedicated experimental branch** for the task, for example `world-surgery`, `bug-0003-lab`, or `experiment/<name>`.
 4. **Make all experimental code changes only on that branch.** Never test risky work directly in production.
-5. **Provide a mobile-accessible preview** of the experimental branch through `kelffren/geminibuglab` only. Never repoint or modify `kelffren/gemini` Pages for lab testing.
-6. **Label the preview clearly** with repository, branch, build/SHA, and `LAB / NOT PRODUCTION` so it cannot be confused with the live game.
-7. **Test on the preview from iPhone/Safari whenever behavior is mobile-sensitive.** Headless or mobile emulation is supporting evidence, not the final gate.
-8. **Record evidence and result classification** using only: `HEADLESS PASS`, `MOBILE EMULATION PASS`, `REAL IPHONE PASS`, `REAL IPHONE FAIL`, or `UNKNOWN`.
-9. **Do not declare a bug fixed from headless evidence alone.** Real iPhone/Safari validation is the final gate for iPhone freezes and rendering/input failures.
-10. **If an experiment fails, keep production untouched.** Revert or abandon only the experimental branch and preserve evidence.
-11. **When an experiment succeeds, isolate the smallest proven patch.** Do not copy the entire lab branch into production.
-12. **Promotion to `kelffren/gemini` is a separate operation.** It requires explicit user instruction and must transfer only the tested patch after confirming the current production HEAD has not changed incompatibly.
+5. **Every branch that changes visible behavior or interaction MUST be previewable through GitHub Pages from `kelffren/geminibuglab`.** A task is not ready for user validation until it has a phone-accessible lab preview.
+6. **Lab Pages must be isolated from production Pages.** Never repoint, reuse, edit, disable, or otherwise modify the Pages deployment/configuration of `kelffren/gemini` to preview lab work.
+7. **The preview must deploy only laboratory code.** Its source branch/workflow/deployment target must belong to `kelffren/geminibuglab`; it must not write into, publish from, or depend on changing the production repository.
+8. **Label the preview clearly** with repository, source branch, build/SHA, and `LAB / NOT PRODUCTION` so it cannot be confused with the live game.
+9. **Test on the preview from iPhone/Safari whenever behavior is mobile-sensitive.** Headless or mobile emulation is supporting evidence, not the final gate.
+10. **Record evidence and result classification** using only: `HEADLESS PASS`, `MOBILE EMULATION PASS`, `REAL IPHONE PASS`, `REAL IPHONE FAIL`, or `UNKNOWN`.
+11. **Do not declare a bug fixed from headless evidence alone.** Real iPhone/Safari validation is the final gate for iPhone freezes and rendering/input failures.
+12. **If an experiment fails, keep production untouched.** Revert or abandon only the experimental branch and preserve evidence.
+13. **When an experiment succeeds, isolate the smallest proven patch.** Do not copy the entire lab branch into production.
+14. **Promotion to `kelffren/gemini` is a separate operation.** It requires explicit user instruction and must transfer only the tested patch after confirming the current production HEAD has not changed incompatibly.
 
-## Preview rule
+## Pages preview contract — mandatory
 
-The user works from iPhone. Every experimental branch intended for visual or interaction testing should be previewable from the phone without requiring a desktop computer.
+The user works from iPhone, so previewability is part of the definition of done for visual, UI, input, rendering, World Editor, gameplay, or interaction work.
 
-Preferred topology:
+For those changes, agents MUST provide a mobile-accessible preview from the laboratory repository before asking the user to validate the work.
+
+Allowed model:
 
 ```text
 kelffren/gemini
-  production — protected from experiments
+  Production code
+  Production Pages
+  DO NOT TOUCH for lab preview
 
 kelffren/geminibuglab
   main — clean lab baseline
-  world-surgery / experiment/* — active experimental branches
-  preview — deployment output if a dedicated publish branch is used
+  world-surgery / experiment/* — experimental source
+  lab Pages deployment — preview only
 ```
 
-A lab preview must never deploy to the production Pages target.
+Hard rules:
+
+- `kelffren/gemini` Pages and `kelffren/geminibuglab` Pages are separate products and separate deployment targets.
+- A lab preview must never overwrite or repoint the production Pages site.
+- A lab workflow must never push preview output into `kelffren/gemini`.
+- Never change production Pages settings merely to make an experimental branch visible.
+- Prefer a dedicated lab deployment workflow or lab publish branch when needed.
+- The preview should identify its source branch and SHA on-screen or in an easily visible diagnostics panel.
+- If Pages preview is unavailable, classify the visual/mobile result as `UNKNOWN`; do not substitute production deployment as a shortcut.
 
 ## Debugging methodology
 
@@ -89,4 +103,4 @@ These are diagnostic references, not permission to roll production back automati
 
 ## Core principle
 
-**Experiment elsewhere, preview safely, prove on the target device, then promote only the smallest verified patch.**
+**Experiment in `geminibuglab`, make the experiment previewable through lab Pages, keep production and production Pages untouched, prove it on the target device, then promote only the smallest verified patch.**
