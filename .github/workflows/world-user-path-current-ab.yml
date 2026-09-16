@@ -1,0 +1,69 @@
+name: World User Path Current A B
+
+on:
+  push:
+    branches:
+      - diagnostic/world-freeze-recovery-20260916-exec
+    paths:
+      - '.github/workflows/world-user-path-current-ab.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  current-ab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout bug lab
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+
+      - name: Compare current main to current fix in WebKit
+        shell: bash
+        run: |
+          set -u
+          LAB="$GITHUB_WORKSPACE"
+          WORK="$RUNNER_TEMP/kelo-current-user-path-ab"
+          ART="$LAB/current-user-path-ab-artifacts"
+          RUNNER="$LAB/lab/user-path-world-webkit.mjs"
+          mkdir -p "$ART"
+          git clone --quiet https://github.com/kelffren/gemini.git "$WORK"
+          cd "$WORK"
+          git checkout --detach -q 6f0ed2dfe57ddae042fc76db19a776a117a21f58
+          npm install --no-audit --no-fund >/tmp/current-ab-npm.log 2>&1
+          npx playwright install webkit --with-deps
+          test_one(){
+            sha="$1"; label="$2"
+            git reset --hard -q
+            git clean -ffd -e node_modules >/dev/null 2>&1 || true
+            git checkout --detach -q "$sha"
+            npm install --no-audit --no-fund >/tmp/current-ab-npm.log 2>&1 || { echo "$label $sha rc=125 npm" | tee -a "$ART/results.txt"; return; }
+            cp "$RUNNER" scripts/__lab-user-path-webkit.mjs
+            python3 -m http.server 4173 --bind 127.0.0.1 >"$ART/http-${label}.log" 2>&1 & server=$!
+            for i in $(seq 1 30); do curl -fsS http://127.0.0.1:4173/index.html >/dev/null 2>&1 && break; sleep .2; done
+            set +e
+            timeout 65s node scripts/__lab-user-path-webkit.mjs --sha="$sha" --out="$ART" --base=http://127.0.0.1:4173/ >>"$ART/run-log.txt" 2>&1
+            rc=$?
+            set -e
+            kill "$server" 2>/dev/null || true; wait "$server" 2>/dev/null || true
+            rm -f scripts/__lab-user-path-webkit.mjs
+            echo "$label $sha rc=$rc" | tee -a "$ART/results.txt"
+          }
+          test_one 6f0ed2dfe57ddae042fc76db19a776a117a21f58 CURRENT_MAIN
+          test_one 5ae8e0fe8592630e0b964483a46c6e3ac9f5c0fb CURRENT_FIX
+          cat "$ART/results.txt"
+
+      - name: Upload evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: world-user-path-current-ab-evidence
+          path: current-user-path-ab-artifacts/
+          retention-days: 14
+          if-no-files-found: warn
