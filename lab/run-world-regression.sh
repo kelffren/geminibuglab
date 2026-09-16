@@ -26,7 +26,7 @@ prepare_deps(){
 
 run_current(){
   local label="$1"
-  local sha
+  local sha rc
   sha="$(git rev-parse HEAD)"
   echo "=== TEST $label $sha ===" | tee -a "$ART/run-log.txt"
   git clean -ffd -e node_modules >/dev/null 2>&1 || true
@@ -41,10 +41,8 @@ run_current(){
     sleep .2
   done
   if [ "$ready" != 1 ]; then kill "$server" 2>/dev/null || true; wait "$server" 2>/dev/null || true; return 125; fi
-  set +e
-  timeout 55s node scripts/__lab-world-freeze-profile.mjs --sha="$sha" --out="$ART" --base=http://127.0.0.1:4173/ >>"$ART/run-log.txt" 2>&1
-  local rc=$?
-  set -e
+  timeout 60s node scripts/__lab-world-freeze-profile.mjs --sha="$sha" --out="$ART" --base=http://127.0.0.1:4173/ >>"$ART/run-log.txt" 2>&1
+  rc=$?
   kill "$server" 2>/dev/null || true
   wait "$server" 2>/dev/null || true
   rm -f scripts/__lab-world-freeze-profile.mjs
@@ -67,12 +65,14 @@ npx playwright install chromium --with-deps
 
 GOOD=""
 for candidate in "${GOOD_CANDIDATES[@]}"; do
-  set +e; checkout_and_test "$candidate" "GOOD_CANDIDATE"; rc=$?; set -e
+  checkout_and_test "$candidate" "GOOD_CANDIDATE"
+  rc=$?
   echo "$candidate rc=$rc" | tee -a "$ART/checkpoint-results.txt"
   if [ "$rc" = 0 ]; then GOOD="$candidate"; break; fi
 done
 
-set +e; checkout_and_test "$BAD" "BAD_HEAD"; BAD_RC=$?; set -e
+checkout_and_test "$BAD" "BAD_HEAD"
+BAD_RC=$?
 echo "$BAD rc=$BAD_RC" | tee -a "$ART/checkpoint-results.txt"
 
 if [ -z "$GOOD" ]; then
@@ -97,16 +97,15 @@ while [ "$round" -lt 18 ]; do
   round=$((round+1))
   current="$(git rev-parse HEAD)"
   echo "BISECT_ROUND=$round SHA=$current" | tee -a "$ART/bisect-steps.txt"
-  set +e; run_current "BISECT_$round"; rc=$?; set -e
+  run_current "BISECT_$round"
+  rc=$?
   if [ "$rc" = 0 ]; then verdict=good
   elif [ "$rc" = 125 ]; then verdict=skip
   else verdict=bad
   fi
   echo "$current $verdict rc=$rc" | tee -a "$ART/bisect-steps.txt"
-  set +e
   output="$(git bisect "$verdict" 2>&1)"
   command_rc=$?
-  set -e
   echo "$output" | tee -a "$ART/bisect-steps.txt"
   if echo "$output" | grep -q "is the first bad commit"; then break; fi
   if [ "$command_rc" != 0 ] && ! echo "$output" | grep -qi "only skipped commits"; then break; fi
