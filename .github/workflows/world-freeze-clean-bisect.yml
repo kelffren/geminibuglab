@@ -1,0 +1,118 @@
+name: World Freeze Clean Bisect
+
+on:
+  push:
+    branches:
+      - diagnostic/world-freeze-recovery-20260916-exec
+    paths:
+      - '.github/workflows/world-freeze-clean-bisect.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  clean-bisect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout bug lab
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+
+      - name: Validate A11 to report-time BAD and bisect
+        id: bisect
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -u
+          LAB="$GITHUB_WORKSPACE"
+          WORK="$RUNNER_TEMP/kelo-world-clean-bisect"
+          ART="$LAB/clean-bisect-artifacts"
+          GOOD="9a2805738e53bf5cdf8cda05dfdf3b3bb52c642c"
+          BAD="ea0dc18a55007351cfdccb37fda5ed1faca9eac3"
+          mkdir -p "$ART"
+          sed "s/u.searchParams.set('creators','1');//" "$LAB/lab/world-freeze-profile-webkit.mjs" > "$RUNNER_TEMP/clean-world-webkit.mjs"
+          git clone --quiet https://github.com/kelffren/gemini.git "$WORK"
+          cd "$WORK"
+          git checkout --detach -q "$BAD"
+          npm install --no-audit --no-fund >/tmp/clean-bisect-npm.log 2>&1
+          npx playwright install webkit --with-deps
+
+          run_current(){
+            sha="$(git rev-parse HEAD)"
+            git clean -ffd -e node_modules >/dev/null 2>&1 || true
+            cp "$RUNNER_TEMP/clean-world-webkit.mjs" scripts/__lab-clean-world-webkit.mjs
+            python3 -m http.server 4173 --bind 127.0.0.1 >"$ART/http-${sha:0:12}.log" 2>&1 & server=$!
+            for i in $(seq 1 30); do curl -fsS http://127.0.0.1:4173/index.html >/dev/null 2>&1 && break; sleep .2; done
+            set +e
+            timeout 55s node scripts/__lab-clean-world-webkit.mjs --sha="$sha" --out="$ART" --base=http://127.0.0.1:4173/ >>"$ART/run-log.txt" 2>&1
+            rc=$?
+            set -e
+            kill "$server" 2>/dev/null || true; wait "$server" 2>/dev/null || true
+            rm -f scripts/__lab-clean-world-webkit.mjs
+            [ "$rc" = 124 ] && rc=1
+            return "$rc"
+          }
+
+          git checkout --detach -q "$GOOD"
+          run_current; GOOD_RC=$?
+          echo "GOOD $GOOD rc=$GOOD_RC" | tee "$ART/validation.txt"
+          git checkout --detach -q "$BAD"
+          run_current; BAD_RC=$?
+          echo "BAD $BAD rc=$BAD_RC" | tee -a "$ART/validation.txt"
+          if [ "$GOOD_RC" != 0 ]; then echo "INVALID_GOOD" | tee "$ART/bisect-result.txt"; exit 3; fi
+          if [ "$BAD_RC" = 0 ]; then echo "BAD_PASSES_CLEAN_OWNER" | tee "$ART/bisect-result.txt"; exit 4; fi
+          if ! git merge-base --is-ancestor "$GOOD" "$BAD"; then echo "GOOD_NOT_ANCESTOR" | tee "$ART/bisect-result.txt"; exit 5; fi
+
+          git bisect start "$BAD" "$GOOD" > "$ART/bisect-start.txt"
+          round=0
+          while [ "$round" -lt 18 ]; do
+            round=$((round+1))
+            current="$(git rev-parse HEAD)"
+            echo "ROUND=$round SHA=$current" | tee -a "$ART/bisect-steps.txt"
+            run_current; rc=$?
+            if [ "$rc" = 0 ]; then verdict=good; else verdict=bad; fi
+            echo "$current $verdict rc=$rc" | tee -a "$ART/bisect-steps.txt"
+            set +e
+            output="$(git bisect "$verdict" 2>&1)"; brc=$?
+            set -e
+            echo "$output" | tee -a "$ART/bisect-steps.txt"
+            if echo "$output" | grep -q "is the first bad commit"; then break; fi
+            [ "$brc" != 0 ] && break
+          done
+          FIRST_BAD="$(git rev-parse refs/bisect/bad 2>/dev/null || true)"
+          git bisect log > "$ART/bisect-log.txt" 2>&1 || true
+          if [ -n "$FIRST_BAD" ]; then
+            PARENT="$(git rev-parse "${FIRST_BAD}^" 2>/dev/null || true)"
+            {
+              echo "GOOD=$GOOD"
+              echo "BAD=$BAD"
+              echo "FIRST_BAD=$FIRST_BAD"
+              echo "PARENT=$PARENT"
+              git show -s --format='SUBJECT=%s%nAUTHOR=%an%nDATE=%aI' "$FIRST_BAD" || true
+            } | tee "$ART/bisect-result.txt"
+            git show --stat --oneline "$FIRST_BAD" > "$ART/first-bad-stat.txt" 2>&1 || true
+            [ -n "$PARENT" ] && git diff --name-status "$PARENT" "$FIRST_BAD" > "$ART/first-bad-files.txt" 2>&1 || true
+            [ -n "$PARENT" ] && git diff "$PARENT" "$FIRST_BAD" -- src/creators src/studio src/world src/core index.html > "$ART/first-bad-focused.diff" 2>&1 || true
+          fi
+          git bisect reset >/dev/null 2>&1 || true
+
+      - name: Preserve result
+        if: ${{ always() }}
+        run: |
+          mkdir -p clean-bisect-artifacts
+          echo "outcome=${{ steps.bisect.outcome }}" > clean-bisect-artifacts/workflow-result.txt
+
+      - name: Upload clean bisect evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: world-freeze-clean-bisect-evidence
+          path: clean-bisect-artifacts/
+          retention-days: 14
+          if-no-files-found: warn
