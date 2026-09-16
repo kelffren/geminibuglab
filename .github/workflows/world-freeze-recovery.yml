@@ -15,7 +15,7 @@ permissions:
 jobs:
   isolate-world-freeze:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 45
     steps:
       - name: Checkout bug lab
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -25,26 +25,26 @@ jobs:
         with:
           node-version: '24'
 
-      - name: Validate checkpoints and bisect regression
+      - name: Validate checkpoints and bisect current regression in WebKit
         id: isolate
         continue-on-error: true
         shell: bash
         run: |
-          chmod +x lab/run-world-regression.sh
-          lab/run-world-regression.sh
+          chmod +x lab/run-world-regression-webkit.sh
+          lab/run-world-regression-webkit.sh
 
       - name: Preserve diagnostic result
         if: ${{ always() }}
         run: |
-          mkdir -p lab-artifacts
-          echo "step_outcome=${{ steps.isolate.outcome }}" > lab-artifacts/workflow-result.txt
-          echo "head=${GITHUB_SHA}" >> lab-artifacts/workflow-result.txt
+          mkdir -p lab-artifacts-webkit
+          echo "step_outcome=${{ steps.isolate.outcome }}" > lab-artifacts-webkit/workflow-result.txt
+          echo "head=${GITHUB_SHA}" >> lab-artifacts-webkit/workflow-result.txt
 
-      - name: Upload Recovery Mesh evidence
+      - name: Upload Recovery Mesh WebKit evidence
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: world-freeze-recovery-evidence
-          path: lab-artifacts/
+          name: world-freeze-recovery-webkit-evidence
+          path: lab-artifacts-webkit/
           retention-days: 14
           if-no-files-found: warn
