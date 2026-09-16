@@ -1,0 +1,73 @@
+name: World Freeze Clean Owner Matrix
+
+on:
+  push:
+    branches:
+      - diagnostic/world-freeze-recovery-20260916-exec
+    paths:
+      - '.github/workflows/world-freeze-clean-owner-matrix.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  clean-owner-matrix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout bug lab
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+
+      - name: Compare a single World boot path in WebKit
+        shell: bash
+        run: |
+          set -u
+          LAB="$GITHUB_WORKSPACE"
+          WORK="$RUNNER_TEMP/kelo-world-clean-owner"
+          ART="$LAB/clean-owner-artifacts"
+          mkdir -p "$ART"
+          # Remove only the query flag that auto-opens Creators. The harness still
+          # imports and opens the real World workspace owner directly.
+          sed "s/u.searchParams.set('creators','1');//" "$LAB/lab/world-freeze-profile-webkit.mjs" > "$RUNNER_TEMP/clean-world-webkit.mjs"
+          git clone --quiet https://github.com/kelffren/gemini.git "$WORK"
+          cd "$WORK"
+          git checkout --detach -q 6f0ed2dfe57ddae042fc76db19a776a117a21f58
+          npm install --no-audit --no-fund >/tmp/clean-owner-npm.log 2>&1
+          npx playwright install webkit --with-deps
+          test_one(){
+            sha="$1"; label="$2"
+            git reset --hard -q
+            git clean -ffd -e node_modules >/dev/null 2>&1 || true
+            git checkout --detach -q "$sha"
+            npm install --no-audit --no-fund >/tmp/clean-owner-npm.log 2>&1 || { echo "$label $sha SKIP npm" | tee -a "$ART/results.txt"; return; }
+            cp "$RUNNER_TEMP/clean-world-webkit.mjs" scripts/__lab-clean-world-webkit.mjs
+            python3 -m http.server 4173 --bind 127.0.0.1 >"$ART/http-${label}.log" 2>&1 & server=$!
+            for i in $(seq 1 30); do curl -fsS http://127.0.0.1:4173/index.html >/dev/null 2>&1 && break; sleep .2; done
+            set +e
+            timeout 65s node scripts/__lab-clean-world-webkit.mjs --sha="$sha" --out="$ART" --base=http://127.0.0.1:4173/ >>"$ART/run-log.txt" 2>&1
+            rc=$?
+            set -e
+            kill "$server" 2>/dev/null || true; wait "$server" 2>/dev/null || true
+            rm -f scripts/__lab-clean-world-webkit.mjs
+            echo "$label $sha rc=$rc" | tee -a "$ART/results.txt"
+          }
+          test_one 9a2805738e53bf5cdf8cda05dfdf3b3bb52c642c A11
+          test_one 58433abd908184ede151b3c8d9fe43b96c0969c1 PREVIOUS_BAD
+          test_one ea0dc18a55007351cfdccb37fda5ed1faca9eac3 REPORT_TIME_BAD
+          test_one 6f0ed2dfe57ddae042fc76db19a776a117a21f58 LATEST_BASE
+          cat "$ART/results.txt"
+
+      - name: Upload clean-owner evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: world-freeze-clean-owner-evidence
+          path: clean-owner-artifacts/
+          retention-days: 14
+          if-no-files-found: warn
