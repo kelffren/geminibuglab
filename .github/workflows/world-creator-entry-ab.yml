@@ -1,0 +1,71 @@
+name: World Creator Entry A B
+
+on:
+  push:
+    branches:
+      - diagnostic/world-freeze-recovery-20260916-exec
+    paths:
+      - '.github/scripts/creator-entry-world-only-diagnostic.py'
+      - '.github/workflows/world-creator-entry-ab.yml'
+      - 'lab/user-path-world-webkit.mjs'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  creator-entry-ab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout bug lab
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Compare full Creator entry to World-only diagnostic
+        shell: bash
+        run: |
+          set -u
+          LAB="$GITHUB_WORKSPACE"
+          WORK="$RUNNER_TEMP/kelo-world-creator-entry-ab"
+          ART="$LAB/creator-entry-ab-artifacts"
+          RUNNER="$LAB/lab/user-path-world-webkit.mjs"
+          TARGET="ea0dc18a55007351cfdccb37fda5ed1faca9eac3"
+          mkdir -p "$ART"
+          git clone --quiet https://github.com/kelffren/gemini.git "$WORK"
+          cd "$WORK"
+          git checkout --detach -q "$TARGET"
+          npm install --no-audit --no-fund >/tmp/creator-entry-ab-npm.log 2>&1
+          npx playwright install webkit --with-deps
+
+          run_case(){
+            label="$1"
+            cp "$RUNNER" scripts/__lab-user-path-webkit.mjs
+            python3 -m http.server 4173 --bind 127.0.0.1 >"$ART/http-${label}.log" 2>&1 & server=$!
+            for i in $(seq 1 30); do curl -fsS http://127.0.0.1:4173/index.html >/dev/null 2>&1 && break; sleep .2; done
+            set +e
+            timeout 65s node scripts/__lab-user-path-webkit.mjs --sha="${TARGET}-${label}" --out="$ART" --base=http://127.0.0.1:4173/ >>"$ART/run-log.txt" 2>&1
+            rc=$?
+            set -e
+            kill "$server" 2>/dev/null || true; wait "$server" 2>/dev/null || true
+            rm -f scripts/__lab-user-path-webkit.mjs
+            echo "$label rc=$rc" | tee -a "$ART/results.txt"
+          }
+
+          run_case FULL_CREATORS
+          git reset --hard -q "$TARGET"
+          git clean -ffd -e node_modules >/dev/null 2>&1 || true
+          python3 "$LAB/.github/scripts/creator-entry-world-only-diagnostic.py" | tee "$ART/surgery.txt"
+          grep -q '__WORLD_ONLY_DIAGNOSTIC__=true' src/creators/creator-entry.mjs
+          run_case WORLD_ONLY_ENTRY
+          cat "$ART/results.txt"
+      - name: Upload A B evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: world-creator-entry-ab-evidence
+          path: creator-entry-ab-artifacts/
+          retention-days: 14
+          if-no-files-found: warn
