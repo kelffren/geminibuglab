@@ -10,7 +10,7 @@ const base=String(args.base||'http://127.0.0.1:4173/');
 const out=path.resolve(args.out||'probe-artifacts');
 const sha=String(args.sha||'unknown');
 fs.mkdirSync(out,{recursive:true});
-const report={schema:1,engine:'webkit',sha,startedAt:new Date().toISOString(),phases:[],lastPhase:null,lastResource:null,resources:[],console:[],pageErrors:[],owner:null,result:'RUNNING',reason:null};
+const report={schema:2,engine:'webkit',sha,startedAt:new Date().toISOString(),phases:[],lastPhase:null,lastResource:null,resources:[],console:[],pageErrors:[],owner:null,result:'RUNNING',reason:null};
 const save=()=>fs.writeFileSync(path.join(out,`phase-${sha.slice(0,12)}.json`),JSON.stringify(report,null,2));
 const timeout=(promise,ms,label)=>Promise.race([promise,new Promise((_,rej)=>setTimeout(()=>rej(new Error(`${label}_TIMEOUT_${ms}`)),ms))]);
 let browser,context,page;
@@ -26,14 +26,24 @@ try{
   page.on('requestfinished',req=>{const u=req.url();if(/\/src\/(studio|creators|world)\//.test(u)){report.lastResource=u.split('?')[0];if(report.resources.length<500)report.resources.push(report.lastResource);}});
   page.on('console',msg=>{if(['error','warning'].includes(msg.type()))report.console.push({type:msg.type(),text:msg.text().slice(0,900)});});
   page.on('pageerror',err=>report.pageErrors.push(String(err?.message||err).slice(0,900)));
-  const target=new URL(base);target.searchParams.set('aiGuest','1');target.searchParams.set('creators','1');target.searchParams.set('freezeLab','1');
+
+  // Direct-owner isolation: intentionally do NOT add ?creators=1. That query
+  // auto-boots Creator Hub and its avatar/sprite compiler graph in parallel,
+  // masking the real World/Studio phase that freezes WebKit.
+  const target=new URL(base);
+  target.searchParams.set('aiGuest','1');
+  target.searchParams.set('freezeLab','1');
+  target.searchParams.set('recoveryLab','1');
+  target.searchParams.set('recoveryFlow','world-open');
   await page.goto(target.href,{waitUntil:'domcontentloaded',timeout:30000});
+
   await timeout(page.evaluate(()=>{
     const original=window.KELO_ADMIN_KEYS||{},facade={};
     for(const key of Reflect.ownKeys(original)){try{const value=original[key];facade[key]=typeof value==='function'?value.bind(original):value;}catch{}}
     let actor='kelo_freeze_lab_admin';try{actor=String(original.playerId?.()||window.keloNet?.playerKey||window.localPlayer?.id||actor);}catch{}
     facade.can=()=>true;facade.playerId=()=>actor;window.KELO_ADMIN_KEYS=facade;return actor;
   }),2500,'ADMIN');
+
   await timeout(page.evaluate(()=>{
     window.__KELO_LAB_WORLD_OPEN={state:'scheduled',error:null};
     Promise.resolve().then(()=>import('./src/creators/workspaces/world-workspace.mjs')).then(mod=>{
