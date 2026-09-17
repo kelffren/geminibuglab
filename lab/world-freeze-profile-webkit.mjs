@@ -13,11 +13,14 @@ const base=String(args.base||'http://127.0.0.1:4173/');
 const out=path.resolve(args.out||'lab-artifacts');
 const sha=String(args.sha||'unknown');
 fs.mkdirSync(out,{recursive:true});
-const report={schema:5,engine:'webkit',sha,startedAt:new Date().toISOString(),result:'RUNNING',reason:null,milestones:[],lastResource:null,resources:[],console:[],pageErrors:[],requestFailures:[],crashed:false};
+const report={schema:6,engine:'webkit',sha,startedAt:new Date().toISOString(),result:'RUNNING',reason:null,milestones:[],lastResource:null,resources:[],console:[],pageErrors:[],requestFailures:[],crashed:false};
 const mark=(name,data={})=>{const row={at:new Date().toISOString(),name,...data};report.milestones.push(row);console.log('LAB_MILESTONE',name,JSON.stringify(data));};
 const save=()=>fs.writeFileSync(path.join(out,`webkit-world-${sha.slice(0,12)}.json`),JSON.stringify(report,null,2));
 const timeout=(promise,ms,label)=>Promise.race([promise,new Promise((_,reject)=>setTimeout(()=>reject(new Error(`${label}_TIMEOUT_${ms}`)),ms))]);
-const target=()=>{const u=new URL(base);u.searchParams.set('aiGuest','1');u.searchParams.set('creators','1');u.searchParams.set('freezeLab','1');u.searchParams.set('recoveryLab','1');u.searchParams.set('recoveryFlow','world-open');u.searchParams.set('bug','BUG-0003');return u.href;};
+// IMPORTANT: no ?creators=1 here. This profile invokes the World owner directly.
+// Adding creators=1 auto-boots Creator Hub and its full compiler graph in parallel,
+// contaminating World regression isolation on WebKit.
+const target=()=>{const u=new URL(base);u.searchParams.set('aiGuest','1');u.searchParams.set('freezeLab','1');u.searchParams.set('recoveryLab','1');u.searchParams.set('recoveryFlow','world-open');u.searchParams.set('bug','BUG-0003');return u.href;};
 
 let browser,context,page,traceStarted=false;
 try{
