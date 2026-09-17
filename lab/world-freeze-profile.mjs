@@ -13,7 +13,7 @@ const base=String(args.base||'http://127.0.0.1:4173/');
 const out=path.resolve(args.out||'lab-artifacts');
 const sha=String(args.sha||'unknown');
 fs.mkdirSync(out,{recursive:true});
-const report={schema:3,sha,startedAt:new Date().toISOString(),result:'RUNNING',reason:null,milestones:[],lastResource:null,resources:[],console:[],pageErrors:[],requestFailures:[],crashed:false};
+const report={schema:4,sha,startedAt:new Date().toISOString(),result:'RUNNING',reason:null,milestones:[],lastResource:null,resources:[],console:[],pageErrors:[],requestFailures:[],crashed:false};
 const mark=(name,data={})=>{const row={at:new Date().toISOString(),name,...data};report.milestones.push(row);console.log('LAB_MILESTONE',name,JSON.stringify(data));};
 const save=()=>fs.writeFileSync(path.join(out,`world-${sha.slice(0,12)}.json`),JSON.stringify(report,null,2));
 const timeout=(promise,ms,label)=>Promise.race([promise,new Promise((_,reject)=>setTimeout(()=>reject(new Error(`${label}_TIMEOUT_${ms}`)),ms))]);
@@ -36,23 +36,27 @@ try{
   await page.goto(target(),{waitUntil:'domcontentloaded',timeout:30000});
   mark('DOM_CONTENT_LOADED');
 
-  // The regression harness is an isolated admin actor. This bypasses only the
-  // authorization boundary, not World authority, Studio boot, tools, rendering,
-  // storage or projection work — those are exactly what this profile measures.
+  // Isolated lab actor. Replace the frozen/final KELO_ADMIN_KEYS object with a
+  // plain invariant-safe facade instead of a Proxy: Proxying non-configurable
+  // methods (playerId/installScopeProvider) violates JS proxy invariants and can
+  // make World authority time out before the code under test is reached.
   await timeout(page.evaluate(()=>{
     const original=window.KELO_ADMIN_KEYS||{};
     window.__KELO_LAB_ORIGINAL_ADMIN_KEYS=original;
-    window.KELO_ADMIN_KEYS=new Proxy(original,{
-      get(target,prop){
-        if(prop==='can')return ()=>true;
-        if(prop==='playerId')return ()=>{
-          try{return target.playerId?.()||'kelo_freeze_lab_admin';}catch{return 'kelo_freeze_lab_admin';}
-        };
-        const value=target[prop];
-        return typeof value==='function'?value.bind(target):value;
-      }
-    });
-    return true;
+    const facade={};
+    for(const key of Reflect.ownKeys(original)){
+      try{
+        const value=original[key];
+        facade[key]=typeof value==='function'?value.bind(original):value;
+      }catch{}
+    }
+    let actorId='kelo_freeze_lab_admin';
+    try{actorId=String(original.playerId?.()||window.keloNet?.playerKey||window.localPlayer?.id||actorId);}catch{}
+    facade.can=()=>true;
+    facade.playerId=()=>actorId;
+    window.KELO_ADMIN_KEYS=facade;
+    window.__KELO_LAB_ACTOR=actorId;
+    return {actorId,keys:Reflect.ownKeys(facade).map(String)};
   }),2500,'ADMIN_LAB_SHIM');
   mark('LAB_ADMIN_AUTHORIZED');
 
