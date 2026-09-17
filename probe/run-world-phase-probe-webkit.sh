@@ -62,6 +62,8 @@ once("    return active;",
 p.write_text(s)
 PY
 
+python3 "$LAB_ROOT/.github/scripts/inject-world-studio-phases.py"
+
 mkdir -p scripts
 cp "$RUNNER" scripts/__world-phase-probe-webkit.mjs
 python3 -m http.server 4173 --bind 127.0.0.1 >"$ART/http.log" 2>&1 & server=$!
